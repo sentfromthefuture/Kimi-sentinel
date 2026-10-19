@@ -1,4 +1,9 @@
 import crypto from "node:crypto";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+// Load the repo-root .env (the same file the web app reads). Variables already set win.
+try { process.loadEnvFile(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../.env")); } catch { /* no .env file */ }
 
 const env = (k: string, d = "") => process.env[k] ?? d;
 
@@ -12,7 +17,9 @@ function deriveKey(): Buffer {
 
 export const config = {
   port: Number(env("PORT", "4000")),
-  databaseUrl: env("DATABASE_URL", "file:./dev.db"),
+  databaseUrl: env("DATABASE_URL"),
+  // Supabase Auth: the server validates the browser's access token. Anon key is public by design.
+  supabase: { url: env("SUPABASE_URL"), anonKey: env("SUPABASE_ANON_KEY") },
   appSecret: env("APP_SECRET", "sentinel-dev-secret"),
   webOrigin: env("WEB_ORIGIN", "http://localhost:5173"),
   credentialKey: deriveKey(),

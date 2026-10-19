@@ -1,6 +1,6 @@
 import { NavLink, Route, Routes, Navigate } from "react-router-dom";
 import { useEffect, useState } from "react";
-import { api } from "./api";
+import { supabase } from "./supabase";
 import Login from "./pages/Login";
 import Overview from "./pages/Overview";
 import Websites from "./pages/Websites";
@@ -20,7 +20,11 @@ const NAV = [
 
 export default function App() {
   const [user, setUser] = useState<any>(undefined);
-  useEffect(() => { api("/api/auth/me").then(setUser).catch(() => setUser(null)); }, []);
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => setUser(data.session?.user ?? null));
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => setUser(session?.user ?? null));
+    return () => sub.subscription.unsubscribe();
+  }, []);
   if (user === undefined) return <div className="p-8 text-gray-500">Loading...</div>;
   if (!user) return <Login onLogin={setUser} />;
 
@@ -38,7 +42,7 @@ export default function App() {
           </NavLink>
         ))}
         <button className="mt-auto text-left px-3 py-2 text-sm text-gray-500 hover:text-gray-300"
-          onClick={async () => { await api("/api/auth/logout", { method: "POST" }); location.reload(); }}>
+          onClick={async () => { await supabase.auth.signOut(); location.reload(); }}>
           Sign out ({user.email})
         </button>
       </aside>

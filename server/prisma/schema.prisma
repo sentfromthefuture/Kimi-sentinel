@@ -1,9 +1,11 @@
-// Sentinel AI database schema.
-// Dev default: SQLite so the app runs immediately (JSON payloads stored as String).
-// For production use Postgres (docker-compose.yml provided) and swap Json fields.
+// Sentinel AI database schema (Supabase Postgres).
+// Tables are created by supabase/schema.sql (run it in the Supabase SQL editor).
+// Users and sessions live in Supabase Auth (auth.users), so userId columns are plain
+// uuids; the foreign key to auth.users is declared in the SQL, not here.
+// JSON payloads are stored as text and (de)serialised by the app.
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -11,29 +13,9 @@ generator client {
   provider = "prisma-client-js"
 }
 
-model User {
-  id           String   @id @default(cuid())
-  email        String   @unique
-  passwordHash String
-  createdAt    DateTime @default(now())
-  sessions     Session[]
-  websites     Website[]
-  notifications Notification[]
-}
-
-model Session {
-  id        String   @id @default(cuid())
-  tokenHash String   @unique
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdAt DateTime @default(now())
-  expiresAt DateTime
-}
-
 model Website {
   id              String    @id @default(cuid())
-  userId          String
-  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId          String    @db.Uuid
   url             String
   hostname        String
   name            String
@@ -41,12 +23,14 @@ model Website {
   protectionLevel String    @default("WATCH")       // WATCH | MONITOR | GUARDIAN
   operatingMode   String    @default("OBSERVER")    // OBSERVER | GUARDIAN | INCIDENT_RESPONSE
   emergencyStop   Boolean   @default(false)
-  lastMonitoredAt DateTime?
-  createdAt       DateTime  @default(now())
+  lastMonitoredAt DateTime? @db.Timestamptz(3)
+  createdAt       DateTime @db.Timestamptz(3) @default(now())
   verifications   Verification[]
   integrations    Integration[]
   events          SecurityEvent[]
   incidents       Incident[]
+
+  @@index([userId])
 }
 
 model Verification {
@@ -56,8 +40,8 @@ model Verification {
   method     String    // DNS_TXT | FILE | OAUTH
   token      String
   status     String    @default("PENDING") // PENDING | VERIFIED | FAILED
-  verifiedAt DateTime?
-  createdAt  DateTime  @default(now())
+  verifiedAt DateTime? @db.Timestamptz(3)
+  createdAt  DateTime @db.Timestamptz(3) @default(now())
 }
 
 model Integration {
@@ -68,9 +52,9 @@ model Integration {
   status          String    @default("DISCONNECTED") // CONNECTED | DISCONNECTED | ERROR | MISSING_PERMISSIONS
   credentialsEnc  String?   // AES-256-GCM encrypted, never exposed to browser
   scopes          String    @default("[]")           // JSON array of granted scopes, e.g. ["events:read"]
-  lastHealthCheck DateTime?
+  lastHealthCheck DateTime? @db.Timestamptz(3)
   lastError       String?
-  createdAt       DateTime  @default(now())
+  createdAt       DateTime @db.Timestamptz(3) @default(now())
   events          SecurityEvent[]
   actions         DefensiveAction[]
 }
@@ -87,8 +71,9 @@ model SecurityEvent {
   sourceIp      String?
   payload       String   // JSON: normalized event fields
   fingerprint   String   // dedupe key
-  receivedAt    DateTime @default(now())
+  receivedAt    DateTime @db.Timestamptz(3) @default(now())
   investigations Investigation[]
+  incidents     Incident[] @relation("IncidentEvents")
 
   @@index([websiteId, receivedAt])
   @@index([fingerprint])
@@ -101,8 +86,8 @@ model Incident {
   title       String
   severity    Int
   status      String   @default("NEW") // NEW | INVESTIGATING | CONTAINED | AWAITING_APPROVAL | RESOLVED | FALSE_POSITIVE
-  startedAt   DateTime @default(now())
-  resolvedAt  DateTime?
+  startedAt   DateTime @db.Timestamptz(3) @default(now())
+  resolvedAt  DateTime? @db.Timestamptz(3)
   events      SecurityEvent[] @relation("IncidentEvents")
   investigations Investigation[]
   actions     DefensiveAction[]
@@ -122,7 +107,7 @@ model Investigation {
   recommendedAction String? // proposed action type, null = none
   evidence        String   // JSON
   actionRequest   String?  // JSON: structured, schema-validated action request
-  createdAt       DateTime @default(now())
+  createdAt       DateTime @db.Timestamptz(3) @default(now())
 }
 
 model DefensiveAction {
@@ -141,9 +126,9 @@ model DefensiveAction {
   error         String?
   requestedBy   String    // agent | user
   approvedBy    String?
-  expiresAt     DateTime?
-  executedAt    DateTime?
-  createdAt     DateTime  @default(now())
+  expiresAt     DateTime? @db.Timestamptz(3)
+  executedAt    DateTime? @db.Timestamptz(3)
+  createdAt     DateTime @db.Timestamptz(3) @default(now())
   approval      ApprovalRequest?
 }
 
@@ -153,8 +138,8 @@ model ApprovalRequest {
   action     DefensiveAction @relation(fields: [actionId], references: [id], onDelete: Cascade)
   status     String   @default("PENDING") // PENDING | APPROVED | DENIED
   decidedBy  String?
-  createdAt  DateTime @default(now())
-  decidedAt  DateTime?
+  createdAt  DateTime @db.Timestamptz(3) @default(now())
+  decidedAt  DateTime? @db.Timestamptz(3)
 }
 
 model AuditLog {
@@ -164,7 +149,7 @@ model AuditLog {
   action    String
   target    String
   meta      String   // JSON
-  createdAt DateTime @default(now())
+  createdAt DateTime @db.Timestamptz(3) @default(now())
 
   @@index([createdAt])
 }
@@ -174,17 +159,18 @@ model AgentDecision {
   websiteId  String
   mode       String
   decision   String   // JSON
-  createdAt  DateTime @default(now())
+  createdAt  DateTime @db.Timestamptz(3) @default(now())
 
   @@index([websiteId, createdAt])
 }
 
 model Notification {
   id        String   @id @default(cuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String   @db.Uuid
   level     String   // info | warning | critical
   message   String
   read      Boolean  @default(false)
-  createdAt DateTime @default(now())
+  createdAt DateTime @db.Timestamptz(3) @default(now())
+
+  @@index([userId, read])
 }

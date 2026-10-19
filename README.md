@@ -37,20 +37,29 @@ defensive actions through verified integrations.
 |---|---|
 | Frontend | React 18 + TypeScript + Vite + Tailwind CSS |
 | Backend | Node.js + Express + TypeScript (ESM) |
-| DB | SQLite via Prisma (dev) — Postgres via docker-compose (prod path) |
+| DB | Supabase Postgres via Prisma (schema in `supabase/schema.sql`) |
 | AI | Provider-independent interface; OpenAI-compatible provider + built-in heuristic fallback |
-| Auth | scrypt password hashing, httpOnly sessions |
+| Auth | Supabase Auth (email + password); the API validates the bearer access token |
 
 ## Quick start
 
 Requires **Node.js >= 20**.
 
+1. In your Supabase project, open **SQL Editor**, paste `supabase/schema.sql` and run it (creates
+   all tables and locks them down with RLS; safe to re-run).
+2. In **Authentication -> Providers -> Email**, turn off "Confirm email" for local testing
+   (otherwise new accounts must click an emailed link before signing in).
+3. Create `.env` and put your database password in `DATABASE_URL`
+   (**Connect -> Session pooler** string):
+
 ```bash
 npm install
-cp .env.example .env
-npm run db:push     # creates server/prisma/dev.db
-npm run dev         # API :4000 + web :5173
+cp .env.example .env     # then edit DATABASE_URL
+npm run db:generate      # builds the Prisma client
+npm run dev              # API :4000 + web :5173
 ```
+
+Do not run `npm run db:push` against Supabase: `supabase/schema.sql` is the source of truth.
 
 Open http://localhost:5173, register, and walk the demo flow:
 
@@ -70,12 +79,14 @@ See `.env.example`. Key variables:
 
 | Variable | Purpose |
 |---|---|
-| `APP_SECRET` | Session signing / dev credential-key derivation (set a long random value) |
+| `APP_SECRET` | Dev credential-key derivation (set a long random value) |
 | `CREDENTIAL_KEY` | Base64 32-byte key for AES-256-GCM credential encryption (prod: set explicitly) |
 | `AI_PROVIDER` | `heuristic` (default, zero-config) or `openai` |
 | `OPENAI_API_KEY` / `OPENAI_MODEL` / `OPENAI_BASE_URL` | LLM provider settings |
 | `DRY_RUN` | `true` makes defensive adapters report what they *would* do without touching production |
-| `DATABASE_URL` | `file:./dev.db` (SQLite default); use `docker-compose.yml` for Postgres |
+| `DATABASE_URL` | Supabase Postgres connection string (Session pooler) |
+| `SUPABASE_URL` / `SUPABASE_ANON_KEY` | Supabase project URL + public anon key (server validates tokens with them) |
+| `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` | Same values, exposed to the web app |
 
 ## Architecture
 
@@ -132,7 +143,7 @@ event -> normalize -> dedupe -> store
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/api/auth/register` / `login` / `logout` | account management |
+| GET | `/api/auth/me` | current user (sign-up/sign-in/out are handled by Supabase Auth in the browser) |
 | GET/POST | `/api/websites` | inventory; POST validates URL + blocks unsafe targets |
 | POST | `/api/websites/:id/verification` + `.../check` | ownership proof |
 | POST | `/api/websites/:id/baseline` | safe public assessment (verified sites only) |
@@ -166,4 +177,4 @@ npm test -w server     # SSRF guard, policy engine gates, prompt-injection harde
   use `DRY_RUN=true` for safe pipeline testing.
 - Wazuh/CrowdSec/ModSecurity/Suricata adapters are specified by the `IntegrationAdapter`
   interface in `server/src/integrations/` — implement against each provider's documented API.
-- SQLite is the dev default; switch `DATABASE_URL` to Postgres for production.
+- The API caches a validated access token for 30 s, so a revoked session can stay valid that long.

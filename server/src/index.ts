@@ -15,7 +15,7 @@ const app = express();
 app.use(express.json({ limit: "256kb" }));
 app.use(cookieParser());
 
-// CSRF mitigation: SameSite=Lax cookies + JSON-only API + custom header on mutations.
+// CSRF mitigation: bearer-token auth (no cookies) + JSON-only API + custom header on mutations.
 app.use((req, res, next) => {
   if (!["GET", "HEAD", "OPTIONS"].includes(req.method) && !req.path.startsWith("/ingest") && req.headers["x-requested-with"] !== "sentinel")
     return res.status(403).json({ error: "Missing CSRF header" });
