@@ -19,7 +19,7 @@ export async function requestDefensiveAction(args: {
 
   const website = await prisma.website.findUniqueOrThrow({ where: { id: websiteId } });
   const integration = integrationId
-    ? await prisma.integration.findUnique({ where: { id: integrationId }) : null;
+    ? await prisma.integration.findUnique({ where: { id: integrationId } }) : null;
 
   const recentActionCount = await prisma.defensiveAction.count({
     where: { websiteId, createdAt: { gte: new Date(Date.now() - 3600_000) },

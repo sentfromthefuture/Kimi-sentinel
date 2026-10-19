@@ -18,7 +18,7 @@ export async function ingestEvent(args: {
   raw: unknown;
 }): Promise<{ eventId: string; deduplicated: boolean }> {
   const integration = args.integrationId
-    ? await prisma.integration.findUnique({ where: { id: args.integrationId }) : null;
+    ? await prisma.integration.findUnique({ where: { id: args.integrationId } }) : null;
   const normalized = normalizeEvent(integration?.kind ?? "APP_EVENTS", args.raw);
   const fingerprint = createHash("sha256")
     .update(JSON.stringify([args.websiteId, normalized.type, normalized.sourceIp, normalized.path, Math.floor(Date.parse(normalized.timestamp) / 60_000)]))

@@ -26,7 +26,7 @@ export async function checkVerification(verificationId: string, websiteId: strin
   let ok = false;
   try {
     if (v.method === "DNS_TXT") {
-      const records = await dns.resolveTxt(websiteIdHostname(websiteId));
+      const records = await dns.resolveTxt(await websiteIdHostname(websiteId));
       ok = records.some((rec) => rec.join("").includes(v.token));
     } else {
       // Fetch the well-known file over HTTPS only, with strict size limit.
