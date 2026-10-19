@@ -1,0 +1,190 @@
+// Sentinel AI database schema.
+// Dev default: SQLite so the app runs immediately (JSON payloads stored as String).
+// For production use Postgres (docker-compose.yml provided) and swap Json fields.
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+  sessions     Session[]
+  websites     Website[]
+  notifications Notification[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+}
+
+model Website {
+  id              String    @id @default(cuid())
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  url             String
+  hostname        String
+  name            String
+  status          String    @default("UNVERIFIED") // UNVERIFIED | ACTIVE | SUSPENDED
+  protectionLevel String    @default("WATCH")       // WATCH | MONITOR | GUARDIAN
+  operatingMode   String    @default("OBSERVER")    // OBSERVER | GUARDIAN | INCIDENT_RESPONSE
+  emergencyStop   Boolean   @default(false)
+  lastMonitoredAt DateTime?
+  createdAt       DateTime  @default(now())
+  verifications   Verification[]
+  integrations    Integration[]
+  events          SecurityEvent[]
+  incidents       Incident[]
+}
+
+model Verification {
+  id         String    @id @default(cuid())
+  websiteId  String
+  website    Website   @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  method     String    // DNS_TXT | FILE | OAUTH
+  token      String
+  status     String    @default("PENDING") // PENDING | VERIFIED | FAILED
+  verifiedAt DateTime?
+  createdAt  DateTime  @default(now())
+}
+
+model Integration {
+  id              String    @id @default(cuid())
+  websiteId       String
+  website         Website   @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  kind            String    // PUBLIC_MONITOR | CLOUDFLARE | WAZUH | CROWDSEC | MODSECURITY | SURICATA | APP_EVENTS
+  status          String    @default("DISCONNECTED") // CONNECTED | DISCONNECTED | ERROR | MISSING_PERMISSIONS
+  credentialsEnc  String?   // AES-256-GCM encrypted, never exposed to browser
+  scopes          String    @default("[]")           // JSON array of granted scopes, e.g. ["events:read"]
+  lastHealthCheck DateTime?
+  lastError       String?
+  createdAt       DateTime  @default(now())
+  events          SecurityEvent[]
+  actions         DefensiveAction[]
+}
+
+model SecurityEvent {
+  id            String   @id @default(cuid())
+  websiteId     String
+  website       Website  @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  integrationId String?
+  integration   Integration? @relation(fields: [integrationId], references: [id])
+  source        String   // REAL | SIMULATED | TEST  (SIMULATED/TEST always labelled as such)
+  type          String   // e.g. failed_login, endpoint_probe, rate_limit_hit, malformed_request, session_anomaly
+  severity      Int      // 0 info, 1 low, 2 medium, 3 high, 4 critical
+  sourceIp      String?
+  payload       String   // JSON: normalized event fields
+  fingerprint   String   // dedupe key
+  receivedAt    DateTime @default(now())
+  investigations Investigation[]
+
+  @@index([websiteId, receivedAt])
+  @@index([fingerprint])
+}
+
+model Incident {
+  id          String   @id @default(cuid())
+  websiteId   String
+  website     Website  @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  title       String
+  severity    Int
+  status      String   @default("NEW") // NEW | INVESTIGATING | CONTAINED | AWAITING_APPROVAL | RESOLVED | FALSE_POSITIVE
+  startedAt   DateTime @default(now())
+  resolvedAt  DateTime?
+  events      SecurityEvent[] @relation("IncidentEvents")
+  investigations Investigation[]
+  actions     DefensiveAction[]
+}
+
+model Investigation {
+  id              String   @id @default(cuid())
+  incidentId      String
+  incident        Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  eventId         String?
+  event           SecurityEvent? @relation(fields: [eventId], references: [id])
+  status          String   @default("NEW") // NEW | INVESTIGATING | COMPLETE | ERROR
+  aiProvider      String   // which provider produced it (e.g. heuristic, openai)
+  explanation     String
+  classification  String   // benign | suspicious | confirmed_threat
+  confidence      Float
+  recommendedAction String? // proposed action type, null = none
+  evidence        String   // JSON
+  actionRequest   String?  // JSON: structured, schema-validated action request
+  createdAt       DateTime @default(now())
+}
+
+model DefensiveAction {
+  id            String    @id @default(cuid())
+  incidentId    String?
+  incident      Incident? @relation(fields: [incidentId], references: [id])
+  integrationId String?
+  integration   Integration? @relation(fields: [integrationId], references: [id])
+  websiteId     String
+  type          String    // rate_limit | block_ip | revoke_session | challenge | notify
+  params        String    // JSON
+  reason        String
+  evidence      String    // JSON
+  status        String    @default("REQUESTED") // REQUESTED | REJECTED_POLICY | APPROVAL_REQUIRED | APPROVED | EXECUTED | CONFIRMED | FAILED | EXPIRED | ROLLED_BACK
+  result        String?
+  error         String?
+  requestedBy   String    // agent | user
+  approvedBy    String?
+  expiresAt     DateTime?
+  executedAt    DateTime?
+  createdAt     DateTime  @default(now())
+  approval      ApprovalRequest?
+}
+
+model ApprovalRequest {
+  id         String   @id @default(cuid())
+  actionId   String   @unique
+  action     DefensiveAction @relation(fields: [actionId], references: [id], onDelete: Cascade)
+  status     String   @default("PENDING") // PENDING | APPROVED | DENIED
+  decidedBy  String?
+  createdAt  DateTime @default(now())
+  decidedAt  DateTime?
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  actor     String   // user:<id> | agent | system
+  action    String
+  target    String
+  meta      String   // JSON
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+model AgentDecision {
+  id         String   @id @default(cuid())
+  websiteId  String
+  mode       String
+  decision   String   // JSON
+  createdAt  DateTime @default(now())
+
+  @@index([websiteId, createdAt])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  level     String   // info | warning | critical
+  message   String
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
